@@ -1,11 +1,11 @@
 [build]
   functions = "functions"
-  publish = "client/build"
+  publish = "build"
   command = "npm install && npm run build"
 
 [dev]
   functions = "functions"
-  publish = "client/build"
+  publish = "build"
 
 [[redirects]]
   from = "/*"
