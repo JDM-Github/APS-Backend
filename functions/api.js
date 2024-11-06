@@ -10,7 +10,7 @@ const router = express.Router();
 const { sequelize } = require("./models");
 const { userRouter, projectRouter } = require("./routers");
 
-DEVELOPMENT = true;
+DEVELOPMENT = false;
 if (DEVELOPMENT) {
 	app.use(
 		cors({

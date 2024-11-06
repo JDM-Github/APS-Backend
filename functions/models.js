@@ -84,6 +84,10 @@ const User = sequelize.define(
 			type: DataTypes.STRING,
 			defaultValue: "Active",
 		},
+		projectManager: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
 		isManager: {
 			type: DataTypes.BOOLEAN,
 			defaultValue: false,
