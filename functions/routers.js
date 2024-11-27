@@ -2,7 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 
 // const jwt = require("jsonwebtoken");
-const { User, Project } = require("./models");
+const { User, Project, Attendance } = require("./models");
 // const { isSeller } = require("./middleware");
 
 const router = express.Router();
@@ -193,6 +193,7 @@ const expressAsyncHandler = require("express-async-handler");
 // 		}
 // 	}
 // }
+
 class UserRoute {
 	constructor() {
 		this.router = router;
@@ -296,10 +297,21 @@ class UserRoute {
 	}
 
 	async getAllEmployees(req, res) {
-		const { is_deact } = req.query;
+		const { notAssigned, is_deact } = req.body;
 
 		try {
-			const users = await User.findAll();
+			const whereClause = {};
+			if (
+				(notAssigned !== undefined && notAssigned == true) ||
+				notAssigned == "true"
+			) {
+				whereClause["projectManager"] = "";
+				whereClause["isManager"] = false;
+			}
+
+			const users = await User.findAll({
+				where: whereClause,
+			});
 			return res.send({
 				success: true,
 				message: "Employees fetched successfully",
@@ -319,6 +331,7 @@ class UserRoute {
 			const users = await User.findAll({
 				where: {
 					isManager: true,
+					projectManager: "",
 				},
 			});
 			return res.send({
@@ -351,12 +364,99 @@ class ProjectRouter {
 			"/get-all-projects",
 			expressAsyncHandler(this.getAllProjects)
 		);
+		this.router.post(
+			"/get-all-project-employee",
+			expressAsyncHandler(this.getAllProjectEmployee)
+		);
+		this.router.post(
+			"/add-project-employee",
+			expressAsyncHandler(this.assignEmployeeOnProject)
+		);
 		// this.router.post(
 		// 	"/deactive:id",
 		// 	isSeller,
 		// 	asyncHandler(this.deactivateProduct)
 		// );
 		// this.router.get("/products", asyncHandler(this.getAllProducts));
+	}
+
+	async assignEmployeeOnProject(req, res) {
+		const { project_id, employee_id } = req.body;
+		try {
+			const project = await Project.findByPk(project_id, {
+				include: {
+					model: User,
+					as: "Users",
+					attributes: ["firstName", "middleName", "lastName"],
+				},
+			});
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+			const user = await User.findByPk(employee_id);
+			if (!user) {
+				return res.send({
+					success: false,
+					message: "Employee does not exist.",
+				});
+			}
+			await user.update({
+				projectManager:
+					project.Users.firstName +
+					" " +
+					project.Users.middleName +
+					" " +
+					project.Users.lastName,
+			});
+			await project.update({
+				projectEmployees: [...project.projectEmployees, employee_id],
+			});
+			res.send({
+				success: true,
+				message: "Project Employees added successfully",
+			});
+		} catch (error) {
+			console.log(error);
+			res.send({
+				success: false,
+				message: "Error on adding Project Employees",
+			});
+		}
+	}
+
+	async getAllProjectEmployee(req, res) {
+		const { id } = req.body;
+		try {
+			const project = await Project.findByPk(id);
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+			});
+			res.send({
+				success: true,
+				message: "Project Employees fetched successfully",
+				users: allUsers,
+			});
+		} catch (error) {
+			console.log(error);
+			res.send({
+				success: false,
+				message: "Error on fetching Project Employees",
+			});
+		}
 	}
 
 	async createProject(req, res) {
@@ -380,6 +480,8 @@ class ProjectRouter {
 					message: "Project name is already being used.",
 				});
 			}
+			const manager = await User.findByPk(projectManager);
+			await manager.update({ projectManager: "self" });
 			await Project.create({
 				projectManager,
 				projectName,
@@ -404,10 +506,10 @@ class ProjectRouter {
 	}
 
 	async getAllProjects(req, res) {
-		const { type } = req.query;
-
+		const { filter } = req.body;
 		try {
 			const projects = await Project.findAll({
+				where: { status: filter },
 				include: {
 					model: User,
 					as: "Users",
@@ -424,6 +526,201 @@ class ProjectRouter {
 			res.send({
 				success: false,
 				message: "Error on fetching Projects",
+			});
+		}
+	}
+}
+
+class HandleAttendance {
+	constructor() {
+		this.router = router;
+		this.initRoutes();
+	}
+	initRoutes() {
+		this.router.post(
+			"/setAttendance",
+			expressAsyncHandler(this.setAttendance)
+		);
+		this.router.post(
+			"/createAttendance",
+			expressAsyncHandler(this.createAttendance)
+		);
+		this.router.post(
+			"/getAllEmployeesAttendance",
+			expressAsyncHandler(this.getAllEmployeesAttendance)
+		);
+	}
+
+	async setAttendance(req, res) {
+		const { userId } = req.body;
+		try {
+			const project = await Project.findOne({
+				where: { projectManager: userId },
+			});
+
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+			});
+
+			if (!allUsers.length) {
+				return res.send({
+					success: false,
+					message: "No employees found in the project.",
+				});
+			}
+
+			const todayDate = new Date().toISOString().split("T")[0];
+			const attendanceData = allUsers.map((user) => {
+				const isOnLeave =
+					user.leaveStart &&
+					user.leaveEnd &&
+					todayDate >= user.leaveStart.toISOString().split("T")[0] &&
+					todayDate <= user.leaveEnd.toISOString().split("T")[0];
+
+				return {
+					userId: user.id,
+					date: todayDate,
+					isPresent: false,
+					isAbsent: false,
+					notDecided: !isOnLeave,
+					isOnLeave: isOnLeave === null || isOnLeave,
+				};
+			});
+
+			await Attendance.bulkCreate(attendanceData);
+			return res.send({
+				success: true,
+				message:
+					"Attendance records created with default absent status.",
+			});
+		} catch (error) {
+			console.error("Error setting attendance:", error);
+			res.status(500).send({ success: false, message: "Server error." });
+		}
+	}
+
+	async createAttendance(req, res) {
+		const { userId, isPresent } = req.body;
+		const todayDate = new Date().toISOString().split("T")[0];
+
+		try {
+			const attendance = await Attendance.findOne({
+				where: {
+					// date: todayDate,
+					userId,
+					isOnLeave: null,
+				},
+			});
+			if (!attendance) {
+				return res.status(404).send({
+					success: false,
+					message: "Attendance record not found or user is on leave.",
+				});
+			}
+			await attendance.update({
+				isPresent: isPresent,
+				isAbsent: !isPresent,
+				isOnLeave: false,
+				notDecided: false,
+			});
+			return res.send({
+				success: true,
+				message: "Attendance updated successfully.",
+			});
+		} catch (error) {
+			console.error("Error updating attendance:", error);
+			return res.status(500).send({
+				success: false,
+				message: "Server error.",
+			});
+		}
+	}
+
+	async getAllEmployeesAttendance(req, res) {
+		const { id, isPresent, isAbsent, isOnLeave, notDecided } = req.body;
+
+		try {
+			let project;
+			if (id == "") {
+				res.send({
+					success: true,
+					message: "Project employees fetched successfully.",
+					users: [],
+				});
+				return;
+			} else project = await Project.findByPk(id);
+
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+			});
+
+			if (allUsers.length === 0) {
+				return res.send({
+					success: false,
+					message: "No employees found for this project.",
+				});
+			}
+
+			const todayDate = new Date().toISOString().split("T")[0];
+			const allAttendance = await Attendance.findAll({
+				where: {
+					userId: {
+						[Op.in]: allUsers.map((user) => user.id),
+					},
+					// isPresent,
+					// isAbsent,
+					// isOnLeave,
+					// notDecided,
+					// date: todayDate,
+				},
+			});
+			const allAttendances = await Attendance.findAll();
+			console.log(allAttendance);
+			console.log(allAttendances);
+			const allUsersInAttendance = allUsers
+				.filter((user) =>
+					allAttendance.some((att) => att.userId === user.id)
+				)
+				.map((user) => {
+					const attendance = allAttendance.find(
+						(att) => att.userId === user.id
+					);
+					return {
+						...user.toJSON(),
+						attendance,
+					};
+				});
+			res.send({
+				success: true,
+				message: "Project employees fetched successfully.",
+				users: allUsersInAttendance,
+			});
+		} catch (error) {
+			console.log(error);
+			res.send({
+				success: false,
+				message: "Error on fetching project employees.",
 			});
 		}
 	}
@@ -560,5 +857,6 @@ class ProjectRouter {
 
 const userRouter = new UserRoute().router;
 const projectRouter = new ProjectRouter().router;
+const handleAttendance = new HandleAttendance().router;
 // const productRouter = new ProductRoute().router;
-module.exports = { userRouter, projectRouter };
+module.exports = { userRouter, projectRouter, handleAttendance };

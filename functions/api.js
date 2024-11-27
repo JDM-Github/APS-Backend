@@ -8,7 +8,7 @@ const app = express();
 const router = express.Router();
 // const sendEmail = require("./emailSender");
 const { sequelize } = require("./models");
-const { userRouter, projectRouter } = require("./routers");
+const { userRouter, projectRouter, handleAttendance } = require("./routers");
 
 DEVELOPMENT = false;
 if (DEVELOPMENT) {
@@ -28,6 +28,7 @@ if (DEVELOPMENT) {
 
 router.use("/users", userRouter);
 router.use("/projects", projectRouter);
+router.use("/attendance", handleAttendance);
 // router.use("/product", productRouter);
 router.get("/reset", async (req, res) => {
 	await sequelize.sync({ force: true });

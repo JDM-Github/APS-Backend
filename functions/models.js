@@ -47,7 +47,6 @@ const User = sequelize.define(
 				isEmail: true,
 			},
 		},
-
 		is_deactivated: {
 			type: DataTypes.BOOLEAN,
 			defaultValue: false,
@@ -100,6 +99,14 @@ const User = sequelize.define(
 			type: DataTypes.DATEONLY,
 			defaultValue: null,
 		},
+		leaveStart: {
+			type: DataTypes.DATEONLY,
+			defaultValue: null,
+		},
+		leaveEnd: {
+			type: DataTypes.DATEONLY,
+			defaultValue: null,
+		},
 	},
 	{
 		timestamps: true,
@@ -134,6 +141,10 @@ const Project = sequelize.define(
 			type: DataTypes.STRING,
 			defaultValue: "",
 		},
+		status: {
+			type: DataTypes.STRING,
+			defaultValue: "Active",
+		},
 		startDate: {
 			type: DataTypes.DATEONLY,
 			defaultValue: null,
@@ -152,6 +163,82 @@ const Project = sequelize.define(
 	}
 );
 
+const Attendance = sequelize.define("Attendance", {
+	date: {
+		type: DataTypes.DATE,
+		defaultValue: DataTypes.NOW,
+	},
+	userId: {
+		type: DataTypes.INTEGER,
+		allowNull: false,
+		references: {
+			model: "Users",
+			key: "id",
+		},
+		onDelete: "CASCADE",
+	},
+	isPresent: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: false,
+	},
+	isAbsent: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: false,
+	},
+	isOnLeave: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: true,
+	},
+	notDecided: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: false,
+	},
+	timeIn: {
+		type: DataTypes.TIME,
+		allowNull: true,
+	},
+	timeOut: {
+		type: DataTypes.TIME,
+		allowNull: true,
+	},
+	place: {
+		type: DataTypes.STRING,
+		allowNull: true,
+	},
+});
+
+const Schedule = sequelize.define("Schedule", {
+	userId: {
+		type: DataTypes.INTEGER,
+		allowNull: false,
+		references: {
+			model: "Users",
+			key: "id",
+		},
+		onDelete: "CASCADE",
+	},
+	date: {
+		type: DataTypes.DATE,
+		allowNull: false,
+	},
+	timeIn: {
+		type: DataTypes.TIME,
+		allowNull: false,
+	},
+	timeOut: {
+		type: DataTypes.TIME,
+		allowNull: false,
+	},
+	description: {
+		type: DataTypes.STRING,
+		defaultValue: "",
+	},
+	isDoned: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: false,
+	},
+});
+
 User.hasMany(Project, {
 	foreignKey: "projectManager",
 	as: "Projects",
@@ -162,4 +249,10 @@ Project.belongsTo(User, {
 	as: "Users",
 });
 
-module.exports = { sequelize, User, Project };
+User.hasMany(Attendance, { foreignKey: "userId" });
+Attendance.belongsTo(User, { foreignKey: "userId" });
+
+User.hasMany(Schedule, { foreignKey: "userId" });
+Schedule.belongsTo(User, { foreignKey: "userId" });
+
+module.exports = { sequelize, User, Project, Attendance, Schedule };
