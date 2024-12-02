@@ -83,6 +83,14 @@ const User = sequelize.define(
 			type: DataTypes.STRING,
 			defaultValue: "Active",
 		},
+		projectId: {
+			type: DataTypes.INTEGER,
+			defaultValue: null,
+		},
+		projectManagerId: {
+			type: DataTypes.INTEGER,
+			defaultValue: null,
+		},
 		projectManager: {
 			type: DataTypes.STRING,
 			defaultValue: "",
@@ -97,6 +105,10 @@ const User = sequelize.define(
 		},
 		endDate: {
 			type: DataTypes.DATEONLY,
+			defaultValue: null,
+		},
+		lastRequest: {
+			type: DataTypes.DATE,
 			defaultValue: null,
 		},
 		leaveStart: {
@@ -187,7 +199,7 @@ const Attendance = sequelize.define("Attendance", {
 	},
 	isOnLeave: {
 		type: DataTypes.BOOLEAN,
-		defaultValue: true,
+		defaultValue: false,
 	},
 	notDecided: {
 		type: DataTypes.BOOLEAN,
@@ -239,6 +251,47 @@ const Schedule = sequelize.define("Schedule", {
 	},
 });
 
+const RequestLeave = sequelize.define(
+	"RequestLeave",
+	{
+		userId: {
+			type: DataTypes.INTEGER,
+			allowNull: false,
+			references: {
+				model: "Users",
+				key: "id",
+			},
+		},
+		reason: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		leaveType: {
+			type: DataTypes.STRING,
+			allowNull: false,
+		},
+		startDate: {
+			type: DataTypes.DATE,
+			allowNull: false,
+		},
+		endDate: {
+			type: DataTypes.DATE,
+			allowNull: false,
+		},
+		accepted: {
+			type: DataTypes.BOOLEAN,
+			defaultValue: false,
+		},
+		denied: {
+			type: DataTypes.BOOLEAN,
+			defaultValue: false,
+		},
+	},
+	{
+		timestamps: true,
+	}
+);
+
 User.hasMany(Project, {
 	foreignKey: "projectManager",
 	as: "Projects",
@@ -255,4 +308,11 @@ Attendance.belongsTo(User, { foreignKey: "userId" });
 User.hasMany(Schedule, { foreignKey: "userId" });
 Schedule.belongsTo(User, { foreignKey: "userId" });
 
-module.exports = { sequelize, User, Project, Attendance, Schedule };
+module.exports = {
+	sequelize,
+	User,
+	Project,
+	Attendance,
+	Schedule,
+	RequestLeave,
+};

@@ -2,7 +2,13 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 
 // const jwt = require("jsonwebtoken");
-const { User, Project, Attendance } = require("./models");
+const {
+	User,
+	Project,
+	Attendance,
+	Schedule,
+	RequestLeave,
+} = require("./models");
 // const { isSeller } = require("./middleware");
 
 const router = express.Router();
@@ -204,7 +210,6 @@ class UserRoute {
 		this.router.post("/create-user", expressAsyncHandler(this.createUser));
 		// this.router.post("/verify", expressAsyncHandler(this.verifyAccount));
 		// this.router.post("/seller", expressAsyncHandler(this.becomeSeller));
-
 		this.router.post("/login", expressAsyncHandler(this.loginUser));
 		this.router.post(
 			"/get-all-employees",
@@ -214,6 +219,298 @@ class UserRoute {
 			"/get-all-manager",
 			expressAsyncHandler(this.getAllManager)
 		);
+		this.router.post(
+			"/makeProjectManager",
+			expressAsyncHandler(this.makeProjectManager)
+		);
+		this.router.post(
+			"/updatePositionSkills",
+			expressAsyncHandler(this.updatePositionSkills)
+		);
+		this.router.post(
+			"/requestLeave",
+			expressAsyncHandler(this.requestLeave)
+		);
+		this.router.post(
+			"/getAllAttendance",
+			expressAsyncHandler(this.getAllAttendance)
+		);
+		this.router.post(
+			"/getMonthlyAttendance",
+			expressAsyncHandler(this.getMonthlyAttendance)
+		);
+	}
+
+	async getAllAttendance(req, res) {
+		const { userId, month, year } = req.body;
+		try {
+			const filters = {};
+			if (userId) {
+				filters.userId = userId;
+			}
+			if (year) {
+				// let startOfYear, endOfYear;
+
+				const selectedYear = year
+					? parseInt(year, 10)
+					: new Date().getFullYear();
+				const selectedMonth = month
+					? parseInt(month, 10) - 1
+					: undefined;
+				console.log(selectedYear);
+				console.log(selectedMonth);
+
+				// const selectedYear = parseInt(year, 10);
+				let startOfYear = new Date(selectedYear, 0, 1);
+				let endOfYear = new Date(selectedYear, 11, 31, 23, 59, 59);
+
+				if (month) {
+					const selectedMonth = parseInt(month, 10) - 1;
+					startOfYear = new Date(selectedYear, selectedMonth, 1);
+					endOfYear = new Date(
+						selectedYear,
+						selectedMonth + 1,
+						0,
+						23,
+						59,
+						59
+					);
+				}
+				filters.date = { [Op.between]: [startOfYear, endOfYear] };
+			}
+			const attendance = await Attendance.findAll({
+				where: filters,
+				order: [["date", "DESC"]],
+			});
+			return res.status(200).send({
+				success: true,
+				message: "Attendance retrieved successfully",
+				attendance,
+			});
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error getting attendance: " + error.message,
+			});
+		}
+	}
+
+	async getMonthlyAttendance(req, res) {
+		const { projectId, month, year } = req.body;
+
+		try {
+			console.log(month);
+			console.log(year);
+			if (!projectId) {
+				return res.status(400).send({
+					success: false,
+					message: "Project Manager is not assigned in any project",
+				});
+			}
+
+			const project = await Project.findByPk(projectId);
+			if (!project) {
+				return res.status(404).send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+				attributes: ["id", "firstName", "middleName", "lastName"],
+			});
+
+			if (!allUsers.length) {
+				return res.status(404).send({
+					success: false,
+					message: "No employees found for the project.",
+				});
+			}
+
+			const selectedYear = year
+				? parseInt(year, 10)
+				: new Date().getFullYear();
+			const selectedMonth = month ? parseInt(month, 10) - 1 : undefined;
+
+			const startOfMonth = new Date(selectedYear, selectedMonth, 1);
+			const endOfMonth = new Date(
+				selectedYear,
+				selectedMonth + 1,
+				0,
+				23,
+				59,
+				59
+			);
+
+			const attendanceRecords = await Attendance.findAll({
+				where: {
+					date: { [Op.between]: [startOfMonth, endOfMonth] },
+					userId: { [Op.in]: allUsers.map((user) => user.id) },
+				},
+				attributes: ["userId", "isPresent", "isAbsent", "isOnLeave"],
+			});
+
+			if (!attendanceRecords.length) {
+				return res.status(200).send({
+					success: true,
+					message:
+						"No attendance records found for the selected month.",
+					data: [],
+				});
+			}
+
+			const attendanceSummary = allUsers.map((user) => ({
+				userId: user.id,
+				userName:
+					user.firstName +
+					" " +
+					(user.middleName ? user.middleName + " " : "") +
+					user.lastName,
+				present: 0,
+				absent: 0,
+				leave: 0,
+			}));
+
+			attendanceRecords.forEach((record) => {
+				const userSummary = attendanceSummary.find(
+					(u) => u.userId === record.userId
+				);
+				if (userSummary) {
+					if (record.isPresent) {
+						userSummary.present += 1;
+					} else if (record.isAbsent) {
+						userSummary.absent += 1;
+					} else if (record.isOnLeave) {
+						userSummary.leave += 1;
+					}
+				}
+			});
+
+			const filteredSummary = attendanceSummary.filter(
+				(user) => user.present > 0 || user.absent > 0 || user.leave > 0
+			);
+
+			return res.status(200).send({
+				success: true,
+				message: "Monthly attendance retrieved successfully",
+				data: filteredSummary,
+			});
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error getting attendance: " + error.message,
+			});
+		}
+	}
+
+	async requestLeave(req, res) {
+		const { userId, reason, leaveType, startDate, endDate } = req.body;
+		try {
+			const user = await User.findByPk(userId);
+
+			if (!user) {
+				return res.status(404).send({
+					success: false,
+					message: "Employee does not exist.",
+				});
+			}
+
+			const currentDate = new Date();
+			const lastRequestDate = new Date(user.lastRequest);
+			const timeDifference = currentDate - lastRequestDate;
+			const oneDayInMilliseconds = 24 * 60 * 60 * 1000;
+
+			if (timeDifference < oneDayInMilliseconds) {
+				return res.status(400).send({
+					success: false,
+					message:
+						"You cannot request leave within 24 hours of your last request.",
+				});
+			}
+			await RequestLeave.destroy({
+				where: { userId },
+			});
+			await RequestLeave.create({
+				userId,
+				reason,
+				leaveType,
+				startDate,
+				endDate,
+			});
+
+			await user.update({
+				lastRequest: currentDate,
+				isManager: true,
+			});
+
+			return res.status(200).send({
+				success: true,
+				message: "Leave request submitted successfully.",
+			});
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error processing the leave request: " + error.message,
+			});
+		}
+	}
+
+	async makeProjectManager(req, res) {
+		const { userId } = req.body;
+		try {
+			const user = await User.findByPk(userId);
+			if (!user) {
+				return res.send({
+					success: false,
+					message: "Employee is does not exists.",
+				});
+			}
+			await user.update({ isManager: true });
+			return res.send({
+				message: "Employee is now project manager.",
+				success: true,
+			});
+		} catch (error) {
+			console.error(error);
+			return res.send({
+				message: "Error making project manager: " + error.message,
+				success: false,
+			});
+		}
+	}
+
+	async updatePositionSkills(req, res) {
+		const { userId, position, skills } = req.body;
+		try {
+			const user = await User.findByPk(userId);
+			if (!user) {
+				return res.send({
+					success: false,
+					message: "Employee is does not exists.",
+				});
+			}
+			console.log(skills);
+			await user.update({ position, skills });
+			console.log(user);
+			return res.send({
+				message: "Employee updated successfully",
+				success: true,
+			});
+		} catch (error) {
+			console.error(error);
+			return res.send({
+				message: "Error making updating employee: " + error.message,
+				success: false,
+			});
+		}
 	}
 
 	async createUser(req, res) {
@@ -327,12 +624,13 @@ class UserRoute {
 	}
 
 	async getAllManager(req, res) {
+		const { doesNotHaveProject } = req.body;
 		try {
+			const whereClause = { isManager: true, projectManager: "" };
+			if (doesNotHaveProject !== undefined && doesNotHaveProject)
+				whereClause["projectId"] = null;
 			const users = await User.findAll({
-				where: {
-					isManager: true,
-					projectManager: "",
-				},
+				where: whereClause,
 			});
 			return res.send({
 				success: true,
@@ -410,6 +708,8 @@ class ProjectRouter {
 					project.Users.middleName +
 					" " +
 					project.Users.lastName,
+				projectManagerId: project.Users.id,
+				projectId: project.id,
 			});
 			await project.update({
 				projectEmployees: [...project.projectEmployees, employee_id],
@@ -481,8 +781,7 @@ class ProjectRouter {
 				});
 			}
 			const manager = await User.findByPk(projectManager);
-			await manager.update({ projectManager: "self" });
-			await Project.create({
+			const newProject = await Project.create({
 				projectManager,
 				projectName,
 				projectLocation,
@@ -491,6 +790,7 @@ class ProjectRouter {
 				startDate,
 				endDate,
 			});
+			await manager.update({ projectId: newProject.id });
 
 			return res.send({
 				message: "Project created successfully",
@@ -538,6 +838,14 @@ class HandleAttendance {
 	}
 	initRoutes() {
 		this.router.post(
+			"/getAllSchedule",
+			expressAsyncHandler(this.getAllSchedule)
+		);
+		this.router.post(
+			"/createSchedule",
+			expressAsyncHandler(this.createSchedule)
+		);
+		this.router.post(
 			"/setAttendance",
 			expressAsyncHandler(this.setAttendance)
 		);
@@ -549,6 +857,45 @@ class HandleAttendance {
 			"/getAllEmployeesAttendance",
 			expressAsyncHandler(this.getAllEmployeesAttendance)
 		);
+		this.router.post(
+			"/getAllEmployeesAttendanceVar",
+			expressAsyncHandler(this.getAllEmployeesAttendanceVar)
+		);
+	}
+
+	async createSchedule(req, res) {
+		const { userId, date, timeFrom, timeTo, description } = req.body;
+		try {
+			await Schedule.create({
+				userId,
+				date,
+				timeIn: timeFrom,
+				timeOut: timeTo,
+				description,
+			});
+			return res.send({
+				success: true,
+			});
+		} catch (error) {
+			console.error("Error getting schedules:", error);
+			res.status(500).send({ success: false, message: "Server error." });
+		}
+	}
+
+	async getAllSchedule(req, res) {
+		const { userId } = req.body;
+		try {
+			const schedules = await Schedule.findAll({
+				where: { userId },
+			});
+			return res.send({
+				success: true,
+				schedules,
+			});
+		} catch (error) {
+			console.error("Error getting schedules:", error);
+			res.status(500).send({ success: false, message: "Server error." });
+		}
 	}
 
 	async setAttendance(req, res) {
@@ -610,32 +957,33 @@ class HandleAttendance {
 	}
 
 	async createAttendance(req, res) {
-		const { userId, isPresent } = req.body;
+		const { userId, timeIn, timeOut, place, status } = req.body;
 		const todayDate = new Date().toISOString().split("T")[0];
 
 		try {
-			const attendance = await Attendance.findOne({
-				where: {
-					// date: todayDate,
-					userId,
-					isOnLeave: null,
-				},
+			console.log({
+				date: todayDate,
+				userId,
+				timeIn,
+				timeOut,
+				place,
+				isPresent: status === "Present",
+				isAbsent: status === "Absent",
+				isOnLeave: status === "Leave",
 			});
-			if (!attendance) {
-				return res.status(404).send({
-					success: false,
-					message: "Attendance record not found or user is on leave.",
-				});
-			}
-			await attendance.update({
-				isPresent: isPresent,
-				isAbsent: !isPresent,
-				isOnLeave: false,
-				notDecided: false,
+			await Attendance.create({
+				date: todayDate,
+				userId,
+				timeIn,
+				timeOut,
+				place,
+				isPresent: status === "Present",
+				isAbsent: status === "Absent",
+				isOnLeave: status === "Leave",
 			});
 			return res.send({
 				success: true,
-				message: "Attendance updated successfully.",
+				message: "Attendance created successfully.",
 			});
 		} catch (error) {
 			console.error("Error updating attendance:", error);
@@ -647,7 +995,7 @@ class HandleAttendance {
 	}
 
 	async getAllEmployeesAttendance(req, res) {
-		const { id, isPresent, isAbsent, isOnLeave, notDecided } = req.body;
+		const { id } = req.body;
 
 		try {
 			let project;
@@ -681,40 +1029,110 @@ class HandleAttendance {
 					message: "No employees found for this project.",
 				});
 			}
-
 			const todayDate = new Date().toISOString().split("T")[0];
-			const allAttendance = await Attendance.findAll({
-				where: {
-					userId: {
-						[Op.in]: allUsers.map((user) => user.id),
-					},
-					// isPresent,
-					// isAbsent,
-					// isOnLeave,
-					// notDecided,
-					// date: todayDate,
+			const whereClause = {
+				userId: {
+					[Op.in]: allUsers.map((user) => user.id),
 				},
+			};
+			const allAttendance = await Attendance.findAll({
+				where: whereClause,
 			});
-			const allAttendances = await Attendance.findAll();
-			console.log(allAttendance);
-			console.log(allAttendances);
-			const allUsersInAttendance = allUsers
-				.filter((user) =>
-					allAttendance.some((att) => att.userId === user.id)
-				)
-				.map((user) => {
-					const attendance = allAttendance.find(
-						(att) => att.userId === user.id
-					);
-					return {
-						...user.toJSON(),
-						attendance,
-					};
-				});
+			const filteredAllAttendance = allAttendance.filter((attendance) => {
+				const attendanceDate = new Date(attendance.date)
+					.toISOString()
+					.split("T")[0];
+				console.log(`ATTENDANCE DATE: ${attendanceDate}`);
+				console.log(`TODAY DATE: ${todayDate}`);
+				return attendanceDate === todayDate;
+			});
+			const attendedUserIds = new Set(
+				filteredAllAttendance.map((attendance) => attendance.userId)
+			);
+			const usersWithoutAttendance = allUsers.filter(
+				(user) => !attendedUserIds.has(user.id)
+			);
 			res.send({
 				success: true,
 				message: "Project employees fetched successfully.",
-				users: allUsersInAttendance,
+				users: usersWithoutAttendance,
+			});
+		} catch (error) {
+			console.log(error);
+			res.send({
+				success: false,
+				message: "Error on fetching project employees.",
+			});
+		}
+	}
+
+	async getAllEmployeesAttendanceVar(req, res) {
+		const { id, isPresent, isAbsent, isOnLeave } = req.body;
+
+		try {
+			let project;
+			if (id == "") {
+				res.send({
+					success: true,
+					message: "Project employees fetched successfully.",
+					users: [],
+				});
+				return;
+			} else project = await Project.findByPk(id);
+
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+			});
+
+			if (allUsers.length === 0) {
+				return res.send({
+					success: false,
+					message: "No employees found for this project.",
+				});
+			}
+			const todayDate = new Date().toISOString().split("T")[0];
+			const whereClause = {
+				userId: {
+					[Op.in]: allUsers.map((user) => user.id),
+				},
+			};
+			if (isPresent !== undefined) whereClause["isPresent"] = isPresent;
+			if (isAbsent !== undefined) whereClause["isAbsent"] = isAbsent;
+			if (isOnLeave !== undefined) whereClause["isOnLeave"] = isOnLeave;
+			const allAttendance = await Attendance.findAll({
+				where: whereClause,
+			});
+			console.log(`ATTENDANCE: ${JSON.stringify(allAttendance)}`);
+			const filteredAllAttendance = allAttendance.filter((attendance) => {
+				const attendanceDate = new Date(attendance.date)
+					.toISOString()
+					.split("T")[0];
+				console.log(`ATTENDANCE DATE: ${attendanceDate}`);
+				console.log(`TODAY DATE: ${todayDate}`);
+				return attendanceDate === todayDate;
+			});
+
+			const attendedUserIds = new Set(
+				filteredAllAttendance.map((attendance) => attendance.userId)
+			);
+			const usersAttendance = allUsers.filter((user) =>
+				attendedUserIds.has(user.id)
+			);
+			res.send({
+				success: true,
+				message: "Project employees fetched successfully.",
+				users: usersAttendance,
 			});
 		} catch (error) {
 			console.log(error);
