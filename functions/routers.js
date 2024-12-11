@@ -1,5 +1,5 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 // const jwt = require("jsonwebtoken");
 const {
@@ -8,6 +8,7 @@ const {
 	Attendance,
 	Schedule,
 	RequestLeave,
+	Notification,
 } = require("./models");
 // const { isSeller } = require("./middleware");
 
@@ -239,6 +240,31 @@ class UserRoute {
 			"/getMonthlyAttendance",
 			expressAsyncHandler(this.getMonthlyAttendance)
 		);
+		this.router.post(
+			"/get-all-leave-request",
+			expressAsyncHandler(this.getAllRequestLeave)
+		);
+		this.router.post(
+			"/getAllNotification",
+			expressAsyncHandler(this.getAllNotification)
+		);
+	}
+
+	async getAllNotification(req, res) {
+		const { userId } = req.body;
+
+		try {
+			const notifications = await Notification.findAll({
+				where: { userId },
+			});
+			res.send({ success: false, notifications });
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error getting notifications: " + error.message,
+			});
+		}
 	}
 
 	async getAllAttendance(req, res) {
@@ -410,6 +436,55 @@ class UserRoute {
 		}
 	}
 
+	async getAllRequestLeave(req, res) {
+		const { projectId } = req.body;
+		try {
+			const project = await Project.findByPk(projectId);
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+			const allUsers = await User.findAll({
+				where: {
+					id: {
+						[Op.in]: project.projectEmployees,
+					},
+				},
+			});
+
+			const userIds = allUsers.map((user) => user.id);
+			const leaveRequests = await RequestLeave.findAll({
+				where: {
+					userId: {
+						[Op.in]: userIds,
+					},
+				},
+				include: {
+					model: User,
+					attributes: ["firstName", "middleName", "lastName"],
+				},
+			});
+			return res.status(200).send({
+				success: true,
+				message: "Leave requests fetched successfully.",
+				data: leaveRequests,
+			});
+
+			// return res.status(200).send({
+			// 	success: true,
+			// 	message: "Leave requests fetched successfully.",
+			// });
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error processing the leave request: " + error.message,
+			});
+		}
+	}
+
 	async requestLeave(req, res) {
 		const { userId, reason, leaveType, startDate, endDate } = req.body;
 		try {
@@ -434,6 +509,7 @@ class UserRoute {
 						"You cannot request leave within 24 hours of your last request.",
 				});
 			}
+
 			await RequestLeave.destroy({
 				where: { userId },
 			});
@@ -448,6 +524,12 @@ class UserRoute {
 			await user.update({
 				lastRequest: currentDate,
 				isManager: true,
+			});
+
+			await Notification.create({
+				userId,
+				title: "Leave Request Submitted",
+				message: `Your leave request for ${startDate} to ${endDate} has been submitted successfully.`,
 			});
 
 			return res.status(200).send({
@@ -524,6 +606,8 @@ class UserRoute {
 			department,
 			skills,
 			isManager,
+			position,
+			isProjectManager,
 		} = req.body;
 
 		try {
@@ -547,6 +631,8 @@ class UserRoute {
 				department,
 				skills,
 				isManager,
+				position,
+				isManager: isProjectManager,
 			});
 
 			return res.send({
@@ -737,7 +823,6 @@ class ProjectRouter {
 					message: "Project does not exist.",
 				});
 			}
-
 			const allUsers = await User.findAll({
 				where: {
 					id: {
@@ -763,11 +848,15 @@ class ProjectRouter {
 		const {
 			projectManager,
 			projectName,
+			budget,
 			projectLocation,
 			projectType,
 			projectDescription,
 			startDate,
 			endDate,
+			clientName,
+			clientEmail,
+			clientType,
 		} = req.body;
 
 		try {
@@ -786,6 +875,10 @@ class ProjectRouter {
 				projectName,
 				projectLocation,
 				projectType,
+				budget,
+				clientName,
+				clientEmail,
+				clientType,
 				projectDescription,
 				startDate,
 				endDate,
@@ -957,25 +1050,23 @@ class HandleAttendance {
 	}
 
 	async createAttendance(req, res) {
-		const { userId, timeIn, timeOut, place, status } = req.body;
+		const { userId, timeIn, place, status } = req.body;
 		const todayDate = new Date().toISOString().split("T")[0];
 
 		try {
-			console.log({
-				date: todayDate,
-				userId,
-				timeIn,
-				timeOut,
-				place,
-				isPresent: status === "Present",
-				isAbsent: status === "Absent",
-				isOnLeave: status === "Leave",
-			});
+			// console.log({
+			// 	date: todayDate,
+			// 	userId,
+			// 	timeIn,
+			// 	place,
+			// 	isPresent: status === "Present",
+			// 	isAbsent: status === "Absent",
+			// 	isOnLeave: status === "Leave",
+			// });
 			await Attendance.create({
 				date: todayDate,
 				userId,
 				timeIn,
-				timeOut,
 				place,
 				isPresent: status === "Present",
 				isAbsent: status === "Absent",
@@ -1015,11 +1106,23 @@ class HandleAttendance {
 				});
 			}
 
+			const currentDate = new Date();
+
 			const allUsers = await User.findAll({
 				where: {
 					id: {
 						[Op.in]: project.projectEmployees,
 					},
+					[Op.or]: [
+						{ leaveStart: null },
+						{ leaveEnd: null },
+						{
+							[Op.and]: [
+								{ leaveStart: { [Op.gt]: currentDate } },
+								{ leaveEnd: { [Op.lt]: currentDate } },
+							],
+						},
+					],
 				},
 			});
 

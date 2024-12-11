@@ -161,6 +161,27 @@ const Project = sequelize.define(
 			type: DataTypes.DATEONLY,
 			defaultValue: null,
 		},
+
+		budget: {
+			type: DataTypes.INTEGER,
+			defaultValue: 0,
+		},
+		clientName: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		clientEmail: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		clientType: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		// RESIDENTIAL
+		// GOVERNMENT
+		// COMMERCIAL
+		// PUBLIC SECTOR
 		endDate: {
 			type: DataTypes.DATEONLY,
 			defaultValue: null,
@@ -212,6 +233,7 @@ const Attendance = sequelize.define("Attendance", {
 	timeOut: {
 		type: DataTypes.TIME,
 		allowNull: true,
+		defaultValue: null,
 	},
 	place: {
 		type: DataTypes.STRING,
@@ -292,6 +314,35 @@ const RequestLeave = sequelize.define(
 	}
 );
 
+const Notification = sequelize.define(
+	"Notification",
+	{
+		userId: {
+			type: DataTypes.INTEGER,
+			allowNull: false,
+			references: {
+				model: "Users",
+				key: "id",
+			},
+		},
+		title: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		message: {
+			type: DataTypes.STRING,
+			defaultValue: "",
+		},
+		read: {
+			type: DataTypes.BOOLEAN,
+			defaultValue: false,
+		},
+	},
+	{
+		timestamps: true,
+	}
+);
+
 User.hasMany(Project, {
 	foreignKey: "projectManager",
 	as: "Projects",
@@ -300,6 +351,14 @@ User.hasMany(Project, {
 Project.belongsTo(User, {
 	foreignKey: "projectManager",
 	as: "Users",
+});
+
+User.hasMany(RequestLeave, {
+	foreignKey: "userId",
+	onDelete: "CASCADE",
+});
+RequestLeave.belongsTo(User, {
+	foreignKey: "userId",
 });
 
 User.hasMany(Attendance, { foreignKey: "userId" });
@@ -315,4 +374,5 @@ module.exports = {
 	Attendance,
 	Schedule,
 	RequestLeave,
+	Notification,
 };
