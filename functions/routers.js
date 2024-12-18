@@ -248,6 +248,57 @@ class UserRoute {
 			"/getAllNotification",
 			expressAsyncHandler(this.getAllNotification)
 		);
+		this.router.post(
+			"/set-active-deactive",
+			expressAsyncHandler(this.updateActiveDeactive)
+		);
+		this.router.post(
+			"/change-password",
+			expressAsyncHandler(this.changePassword)
+		);
+	}
+
+	async changePassword(req, res) {
+		const { email, password } = req.body;
+		try {
+			const user = await User.findOne({ where: { email } });
+			if (!user) {
+				return res.status(500).send({
+					success: false,
+					message: "User not found.",
+				});
+			}
+			const hashedPassword = await bcrypt.hash(password, 10);
+			await user.update({ password: hashedPassword });
+			res.send({ success: true });
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error getting notifications: " + error.message,
+			});
+		}
+	}
+
+	async updateActiveDeactive(req, res) {
+		const { id } = req.body;
+		try {
+			const user = await User.findByPk(id);
+			if (!user) {
+				return res.status(500).send({
+					success: false,
+					message: "User not found.",
+				});
+			}
+			await user.update({ is_deactivated: !user.is_deactivated });
+			res.send({ success: true });
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error getting notifications: " + error.message,
+			});
+		}
 	}
 
 	async getAllNotification(req, res) {
@@ -257,7 +308,7 @@ class UserRoute {
 			const notifications = await Notification.findAll({
 				where: { userId },
 			});
-			res.send({ success: false, notifications });
+			res.send({ success: true, notifications });
 		} catch (error) {
 			console.error(error);
 			return res.status(500).send({
@@ -664,6 +715,13 @@ class UserRoute {
 				});
 			}
 
+			if (user.is_deactivated) {
+				return res.send({
+					success: false,
+					message: "User is deactivated.",
+				});
+			}
+
 			return res.send({
 				message: "Login successful",
 				success: true,
@@ -756,6 +814,7 @@ class ProjectRouter {
 			"/add-project-employee",
 			expressAsyncHandler(this.assignEmployeeOnProject)
 		);
+		this.router.post("/getProject", expressAsyncHandler(this.getProject));
 		// this.router.post(
 		// 	"/deactive:id",
 		// 	isSeller,
@@ -834,6 +893,41 @@ class ProjectRouter {
 				success: true,
 				message: "Project Employees fetched successfully",
 				users: allUsers,
+			});
+		} catch (error) {
+			console.log(error);
+			res.send({
+				success: false,
+				message: "Error on fetching Project Employees",
+			});
+		}
+	}
+
+	async getProject(req, res) {
+		const { id } = req.body;
+		try {
+			const project = await Project.findByPk(id, {
+				include: {
+					model: User,
+					as: "Users",
+					attributes: ["firstName", "middleName", "lastName"],
+				},
+			});
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project does not exist.",
+				});
+			}
+			if (!project) {
+				return res.send({
+					success: false,
+					message: "Project not found",
+				});
+			}
+			res.send({
+				success: true,
+				project,
 			});
 		} catch (error) {
 			console.log(error);
