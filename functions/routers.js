@@ -17,6 +17,12 @@ const router = express.Router();
 const { Op } = require("sequelize");
 const expressAsyncHandler = require("express-async-handler");
 
+function isStrongPassword(password) {
+	const passwordRegex =
+		/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+	return passwordRegex.test(password);
+}
+
 // const JWT_SECRET = process.env.JWT_SECRET || "instamine";
 
 // async function addChatPartner(userId, partnerId) {
@@ -256,6 +262,35 @@ class UserRoute {
 			"/change-password",
 			expressAsyncHandler(this.changePassword)
 		);
+		this.router.post(
+			"/verify-email",
+			expressAsyncHandler(this.verifyEmail)
+		);
+		this.router.post(
+			"/updateProfile",
+			expressAsyncHandler(this.updateProfile)
+		);
+	}
+
+	async verifyEmail(req, res) {
+		const { email } = req.body;
+		try {
+			const user = await User.findOne({ where: { email } });
+			if (!user) {
+				return res.status(500).send({
+					success: false,
+					message: "User not found.",
+				});
+			}
+			await user.update({ isVerified: true });
+			res.send({ success: true });
+		} catch (error) {
+			console.error(error);
+			return res.status(500).send({
+				success: false,
+				message: "Error email verification: " + error.message,
+			});
+		}
 	}
 
 	async changePassword(req, res) {
@@ -290,8 +325,19 @@ class UserRoute {
 					message: "User not found.",
 				});
 			}
-			await user.update({ is_deactivated: !user.is_deactivated });
-			res.send({ success: true });
+			if (user.isVerified) {
+				const message = !user.is_deactivated
+					? "Account has been successfully deactivated"
+					: "Account has been successfully activated";
+				await user.update({ is_deactivated: !user.is_deactivated });
+				return res.send({ success: true, message });
+			} else {
+				await user.destroy();
+				return res.send({
+					success: true,
+					message: "Account has been successfully deleted.",
+				});
+			}
 		} catch (error) {
 			console.error(error);
 			return res.status(500).send({
@@ -377,12 +423,10 @@ class UserRoute {
 		const { projectId, month, year } = req.body;
 
 		try {
-			console.log(month);
-			console.log(year);
 			if (!projectId) {
 				return res.status(400).send({
 					success: false,
-					message: "Project Manager is not assigned in any project",
+					message: "Cannot find report for this project",
 				});
 			}
 
@@ -452,6 +496,7 @@ class UserRoute {
 				present: 0,
 				absent: 0,
 				leave: 0,
+				late: 0,
 			}));
 
 			attendanceRecords.forEach((record) => {
@@ -465,18 +510,22 @@ class UserRoute {
 						userSummary.absent += 1;
 					} else if (record.isOnLeave) {
 						userSummary.leave += 1;
+					} else {
+						userSummary.late += 1;
 					}
 				}
 			});
 
-			const filteredSummary = attendanceSummary.filter(
-				(user) => user.present > 0 || user.absent > 0 || user.leave > 0
-			);
+			// const filteredSummary = attendanceSummary.filter(
+			// 	(user) => user.present > 0 || user.absent > 0 || user.leave > 0 || user.late > 0
+			// );
+
+			console.log(attendanceSummary);
 
 			return res.status(200).send({
 				success: true,
 				message: "Monthly attendance retrieved successfully",
-				data: filteredSummary,
+				data: attendanceSummary,
 			});
 		} catch (error) {
 			console.error(error);
@@ -606,6 +655,13 @@ class UserRoute {
 					message: "Employee is does not exists.",
 				});
 			}
+			if (user.projectManager !== "" || user.projectId)
+			{
+				return res.send({
+					success: false,
+					message: "Employee cannot be a project manager when employee is already assigned to project.",
+				});
+			}
 			await user.update({ isManager: true });
 			return res.send({
 				message: "Employee is now project manager.",
@@ -646,6 +702,45 @@ class UserRoute {
 		}
 	}
 
+	async updateProfile(req, res) {
+		const { userId, address, phone } = req.body;
+
+		if (!userId) {
+			return res.status(400).send({
+				success: false,
+				message: "User ID is required.",
+			});
+		}
+
+		try {
+			const user = await User.findByPk(userId);
+			if (!user) {
+				return res.status(404).send({
+					success: false,
+					message: "User not found.",
+				});
+			}
+
+			await user.update({location: address, phoneNumber: phone})
+
+			return res.send({
+				success: true,
+				message: "Profile updated successfully.",
+				data: {
+					userId: user.id,
+					address: user.location,
+					phone: user.phoneNumber,
+				},
+			});
+		} catch (error) {
+			console.error("Error updating profile:", error);
+			return res.status(500).send({
+				success: false,
+				message: "An error occurred while updating the profile.",
+			});
+		}
+	}
+
 	async createUser(req, res) {
 		const {
 			firstName,
@@ -662,7 +757,15 @@ class UserRoute {
 		} = req.body;
 
 		try {
-			const user = await User.findOne({
+			if (!isStrongPassword(password)) {
+				return res.send({
+					success: false,
+					message:
+						"Password must be at least 8 characters long and include uppercase, lowercase, numbers, and special characters.",
+				});
+			}
+
+			let user = await User.findOne({
 				where: { email },
 			});
 			if (user) {
@@ -672,7 +775,7 @@ class UserRoute {
 				});
 			}
 			const hashedPassword = await bcrypt.hash(password, 10);
-			await User.create({
+			user = await User.create({
 				firstName,
 				lastName,
 				middleName,
@@ -684,6 +787,12 @@ class UserRoute {
 				isManager,
 				position,
 				isManager: isProjectManager,
+			});
+
+			await Notification.create({
+				userId: user.id,
+				title: "Account Created",
+				message: "Your account has been created successfully.",
 			});
 
 			return res.send({
@@ -708,12 +817,12 @@ class UserRoute {
 				where: { email: normalizedEmail },
 			});
 
-			if (!user || !(await bcrypt.compare(password, user.password))) {
-				return res.send({
-					success: false,
-					message: "Email or password is invalid.",
-				});
-			}
+			// if (!user || !(await bcrypt.compare(password, user.password))) {
+			// 	return res.send({
+			// 		success: false,
+			// 		message: "Email or password is invalid.",
+			// 	});
+			// }
 
 			if (user.is_deactivated) {
 				return res.send({
@@ -721,6 +830,7 @@ class UserRoute {
 					message: "User is deactivated.",
 				});
 			}
+			
 
 			return res.send({
 				message: "Login successful",
@@ -738,7 +848,7 @@ class UserRoute {
 	}
 
 	async getAllEmployees(req, res) {
-		const { notAssigned, is_deact } = req.body;
+		const { notAssigned, isVerified } = req.body;
 
 		try {
 			const whereClause = {};
@@ -748,6 +858,10 @@ class UserRoute {
 			) {
 				whereClause["projectManager"] = "";
 				whereClause["isManager"] = false;
+			}
+
+			if (isVerified !== undefined) {
+				whereClause["isVerified"] = isVerified;
 			}
 
 			const users = await User.findAll({
@@ -770,7 +884,11 @@ class UserRoute {
 	async getAllManager(req, res) {
 		const { doesNotHaveProject } = req.body;
 		try {
-			const whereClause = { isManager: true, projectManager: "" };
+			const whereClause = {
+				isManager: true,
+				projectManager: "",
+				isVerified: true,
+			};
 			if (doesNotHaveProject !== undefined && doesNotHaveProject)
 				whereClause["projectId"] = null;
 			const users = await User.findAll({
@@ -1048,6 +1166,10 @@ class HandleAttendance {
 			"/getAllEmployeesAttendanceVar",
 			expressAsyncHandler(this.getAllEmployeesAttendanceVar)
 		);
+		this.router.post(
+			"/addTimeoutAndCalculateHours",
+			expressAsyncHandler(this.addTimeoutAndCalculateHours)
+		);
 	}
 
 	async createSchedule(req, res) {
@@ -1148,15 +1270,6 @@ class HandleAttendance {
 		const todayDate = new Date().toISOString().split("T")[0];
 
 		try {
-			// console.log({
-			// 	date: todayDate,
-			// 	userId,
-			// 	timeIn,
-			// 	place,
-			// 	isPresent: status === "Present",
-			// 	isAbsent: status === "Absent",
-			// 	isOnLeave: status === "Leave",
-			// });
 			await Attendance.create({
 				date: todayDate,
 				userId,
@@ -1165,6 +1278,7 @@ class HandleAttendance {
 				isPresent: status === "Present",
 				isAbsent: status === "Absent",
 				isOnLeave: status === "Leave",
+				isLate: status === "Late",
 			});
 			return res.send({
 				success: true,
@@ -1172,6 +1286,136 @@ class HandleAttendance {
 			});
 		} catch (error) {
 			console.error("Error updating attendance:", error);
+			return res.status(500).send({
+				success: false,
+				message: "Server error.",
+			});
+		}
+	}
+
+	async checkAttendanceStatus(req, res) {
+		const { userId } = req.body;
+		const todayDate = new Date().toISOString().split("T")[0];
+
+		try {
+			const attendanceRecord = await Attendance.findOne({
+				where: {
+					userId: userId,
+					date: todayDate,
+					isPresent: true,
+				},
+			});
+
+			if (attendanceRecord) {
+				const alreadyTimedOut = attendanceRecord.timeOut !== null;
+
+				return res.send({
+					success: true,
+					message: alreadyTimedOut
+						? "You have already timed out today."
+						: "You are currently marked as attended but have not timed out.",
+					data: {
+						hasTimedOut: alreadyTimedOut,
+						attendance: attendanceRecord,
+					},
+				});
+			} else {
+				return res.send({
+					success: false,
+					message: "No attendance record found for today.",
+				});
+			}
+		} catch (error) {
+			console.error("Error checking attendance status:", error);
+			return res.status(500).send({
+				success: false,
+				message: "Server error.",
+			});
+		}
+	}
+
+	async addTimeoutAndCalculateHours(req, res) {
+		const { userId } = req.body;
+		const todayDate = new Date().toISOString().split("T")[0];
+
+		try {
+			const attendanceRecord = await Attendance.findOne({
+				where: {
+					userId: userId,
+					[Op.or]: [
+						{isPresent: true},
+						{isLate: false},
+					],
+				},
+			});
+			if (!attendanceRecord) {
+				return res.status(404).send({
+					success: false,
+					message: "No attendance record found for today.",
+				});
+			}
+
+			const attendanceDate = new Date(attendanceRecord.date)
+				.toISOString()
+				.split("T")[0];
+			if (attendanceDate !== todayDate)
+			{
+				return res.status(404).send({
+					success: false,
+					message: "No attendance record found for today.",
+				});
+			}
+			if (attendanceRecord.timeOut) {
+				return res.send({
+					success: true,
+					message: "You have already timed out today.",
+					data: attendanceRecord,
+				});
+			}
+
+			const currentTime = new Date().toLocaleTimeString("en-US", {
+				hour12: false,
+			});
+			attendanceRecord.timeOut = currentTime;
+
+			if (attendanceRecord.timeIn) {
+				const timeIn = new Date(
+					`1970-01-01T${attendanceRecord.timeIn}Z`
+				);
+				const timeOut = new Date(`1970-01-01T${currentTime}Z`);
+				const diffInMilliseconds = timeOut - timeIn;
+				const hoursWorked = Math.floor(
+					diffInMilliseconds / (1000 * 60 * 60)
+				);
+
+				const userRecord = await User.findOne({
+					where: { id: userId },
+				});
+				if (userRecord) {
+					userRecord.workingHrs += hoursWorked;
+					await userRecord.save();
+				}
+			} else {
+				return res.status(400).send({
+					success: false,
+					message:
+						"Time in is not set, cannot calculate working hours.",
+				});
+			}
+
+			await attendanceRecord.save();
+
+			return res.send({
+				success: true,
+				message:
+					"Timeout added and working hours updated successfully.",
+				data: {
+					timeOut: attendanceRecord.timeOut,
+					workingHrs: attendanceRecord.workingHrs,
+				},
+			});
+		} catch (error) {
+			console.error("Error adding timeout and calculating hours:", error);
 			return res.status(500).send({
 				success: false,
 				message: "Server error.",
@@ -1219,6 +1463,8 @@ class HandleAttendance {
 					],
 				},
 			});
+			console.log(project.projectEmployees);
+			console.log(allUsers);
 
 			if (allUsers.length === 0) {
 				return res.send({
@@ -1264,7 +1510,7 @@ class HandleAttendance {
 	}
 
 	async getAllEmployeesAttendanceVar(req, res) {
-		const { id, isPresent, isAbsent, isOnLeave } = req.body;
+		const { id, isPresent, isAbsent, isOnLeave, isLate } = req.body;
 
 		try {
 			let project;
@@ -1307,25 +1553,58 @@ class HandleAttendance {
 			if (isPresent !== undefined) whereClause["isPresent"] = isPresent;
 			if (isAbsent !== undefined) whereClause["isAbsent"] = isAbsent;
 			if (isOnLeave !== undefined) whereClause["isOnLeave"] = isOnLeave;
+			if (isLate !== undefined) whereClause["isLate"] = isLate;
 			const allAttendance = await Attendance.findAll({
 				where: whereClause,
 			});
-			console.log(`ATTENDANCE: ${JSON.stringify(allAttendance)}`);
 			const filteredAllAttendance = allAttendance.filter((attendance) => {
 				const attendanceDate = new Date(attendance.date)
 					.toISOString()
 					.split("T")[0];
-				console.log(`ATTENDANCE DATE: ${attendanceDate}`);
-				console.log(`TODAY DATE: ${todayDate}`);
 				return attendanceDate === todayDate;
 			});
 
 			const attendedUserIds = new Set(
 				filteredAllAttendance.map((attendance) => attendance.userId)
 			);
-			const usersAttendance = allUsers.filter((user) =>
-				attendedUserIds.has(user.id)
-			);
+			// const usersAttendance = allUsers.filter((user) =>
+			// 	attendedUserIds.has(user.id)
+			// );
+
+			const usersAttendance = allUsers
+				.map((user) => {
+					const userAttendance = filteredAllAttendance.find(
+						(attendance) => attendance.userId === user.id
+					);
+
+					if (userAttendance) {
+						user.setDataValue("attendance", {
+							isLate: userAttendance.isLate,
+							isPresent: userAttendance.isPresent,
+							isAbsent: userAttendance.isAbsent,
+							isOnLeave: userAttendance.isOnLeave,
+							notDecided: userAttendance.notDecided,
+							timeIn: userAttendance.timeIn,
+							timeOut: userAttendance.timeOut,
+							place: userAttendance.place,
+						});
+					} else {
+						user.setDataValue("attendance", {
+							isLate: false,
+							isPresent: false,
+							isAbsent: true,
+							isOnLeave: false,
+							notDecided: false,
+							timeIn: null,
+							timeOut: null,
+							place: null,
+						});
+					}
+					return user;
+				})
+				.filter((user) => attendedUserIds.has(user.id));
+
+			console.log(usersAttendance);
 			res.send({
 				success: true,
 				message: "Project employees fetched successfully.",

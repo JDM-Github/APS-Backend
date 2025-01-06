@@ -119,6 +119,14 @@ const User = sequelize.define(
 			type: DataTypes.DATEONLY,
 			defaultValue: null,
 		},
+		isVerified: {
+			type: DataTypes.BOOLEAN,
+			defaultValue: false,
+		},
+		workingHrs: {
+			type: INTEGER,
+			defaultValue: 0
+		}
 	},
 	{
 		timestamps: true,
@@ -209,6 +217,10 @@ const Attendance = sequelize.define("Attendance", {
 			key: "id",
 		},
 		onDelete: "CASCADE",
+	},
+	isLate: {
+		type: DataTypes.BOOLEAN,
+		defaultValue: false,
 	},
 	isPresent: {
 		type: DataTypes.BOOLEAN,
