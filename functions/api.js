@@ -7,6 +7,7 @@ const bodyParser = require("body-parser");
 const app = express();
 const router = express.Router();
 const sendEmail = require("./emailSender");
+const fileHandler = require("./fileHandler");
 const { sequelize } = require("./models");
 const { userRouter, projectRouter, handleAttendance } = require("./routers");
 
@@ -69,6 +70,7 @@ router.post("/send-email", (req, res) => {
 	});
 });
 
+router.use("/file", fileHandler);
 router.use("/users", userRouter);
 router.use("/projects", projectRouter);
 router.use("/attendance", handleAttendance);

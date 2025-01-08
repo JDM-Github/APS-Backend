@@ -125,8 +125,8 @@ const User = sequelize.define(
 		},
 		workingHrs: {
 			type: INTEGER,
-			defaultValue: 0
-		}
+			defaultValue: 0,
+		},
 	},
 	{
 		timestamps: true,
@@ -355,6 +355,29 @@ const Notification = sequelize.define(
 	}
 );
 
+const ProjectReport = sequelize.define("ProjectReport", {
+	projectId: {
+		type: DataTypes.INTEGER,
+		allowNull: false,
+		references: {
+			model: "Projects",
+			key: "id",
+		},
+	},
+	titleReport: {
+		type: DataTypes.STRING,
+		defaultValue: "",
+	},
+	description: {
+		type: DataTypes.STRING,
+		defaultValue: "",
+	},
+	uploadedPicture: {
+		type: DataTypes.STRING,
+		defaultValue: "",
+	},
+},{timestamps: true,});
+
 User.hasMany(Project, {
 	foreignKey: "projectManager",
 	as: "Projects",
@@ -365,6 +388,14 @@ Project.belongsTo(User, {
 	as: "Users",
 });
 
+// User.hasMany(Notification, {
+// 	foreignKey: "userId",
+// 	onDelete: "CASCADE",
+// });
+// Notification.belongsTo(User, {
+// 	foreignKey: "userId",
+// 	onDelete: "CASCADE",
+// });
 User.hasMany(RequestLeave, {
 	foreignKey: "userId",
 	onDelete: "CASCADE",
@@ -387,4 +418,5 @@ module.exports = {
 	Schedule,
 	RequestLeave,
 	Notification,
+	ProjectReport,
 };
